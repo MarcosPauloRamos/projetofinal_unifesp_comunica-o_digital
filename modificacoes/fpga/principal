@@ -1,261 +1,382 @@
-module Processador (
-    input Clock,
-    input Reset,
-    
-    // =========================================================================
-    // PORTAS DE SAÍDA EXCLUSIVAS PARA OBSERVAÇÃO NA WAVEFORM (DEBUG)
-    // =========================================================================
-    // Estado do Fluxo de Programa
-    output [31:0] out_PC_Atual,       // Para ver qual endereço de instrução está rodando
-    output [31:0] out_PC_Proximo,     // Para ver para onde o PC vai saltar no próximo clock
-    output [31:0] out_Instrucao,      // Para ver a instrução de 32 bits atual
-    
-    // Monitoramento do Banco de Registradores
-    output [31:0] out_DadoLido1,      // Valor que saiu da porta 1 do banco (Valor1 da ULA)
-    output [31:0] out_DadoLido2,      // Valor que saiu da porta 2 do banco (Valor2 da ULA ou dado p/ RAM)
-    output [5:0]  out_RegEscrita,     // Qual registrador está sendo o destino da gravação (rd ou RAL)
-    output [31:0] out_DadoEscrita,    // O dado exato que está entrando para ser gravado no banco
-    
-    // Monitoramento da ULA e Memória RAM
-    output [31:0] out_ResultadoULA,   // O resultado direto da operação da ULA
-    output        out_Zero,           // Flag Zero (crucial para checar BEQ/BNE)
-    output [31:0] out_IMEstendido,    // O valor do imediato após passar pelo extensor de sinal
-    output [31:0] out_DadoMemoria,    // O dado que acabou de ser lido da memória RAM
-    
-    // Monitoramento de Barramentos de Controle 
-    output [3:0]  out_ALUOp,          // Operação selecionada para a ULA
-    output [1:0]  out_MemToReg,       // Seletor do MUX de Write-Back
-    output [1:0]  out_ExtOp,          // Seletor do tipo de extensão do imediato
-    output        out_RegWrite,       // Habilitação de escrita no banco
-    output        out_MemWrite,       // Habilitação de escrita na RAM
-    output        out_MemRead,        // Habilitação de leitura na RAM
-    output        out_ALUSrc,         // Seletor de entrada da ULA (Reg vs Imediato)
-    output        out_Jump,           // Sinal de Jump ativo
-    output        out_Branch,         // Sinal de Branch ativo
-    output        out_JR,             // Sinal de Jump Register ativo
-    output        out_Halt            // Sinal de parada do processador
+module BMCORE_FPGA 
+(
+	input wire check, clk_auto, input_reset,
+	input wire interface_mode,	
+	input wire [15:0] switches,						
+	output wire hlt, negative, lcd_on, lcd_blon, lcd_rw, lcd_en, lcd_rs,
+	output wire [6:0] mil_out, cent_out, dez_out, uni_out, dez_out_pc, uni_out_pc, dez_out_reg_address, uni_out_reg_address,
+	output wire [7:0] lcd_data,
+	output wire [15:0] input_mux_output,
+	input wire uart_rx,
+	output wire uart_tx
 );
+	
+	wire [31:0] output_value;
+	wire [31:0] bios_output;
+	wire [31:0] instr_mem_output;
+	wire [31:0] Extend26_32;
+	wire [31:0] Extend16_32;
+	wire [31:0] PAM_output;
+	wire [31:0] address_in;
+	wire [31:0] last_proc;
+	wire [31:0] HDRM_out;
+	wire [31:0] data_write;
+	wire [31:0] data_1, data_2, data_3;
+	wire [31:0] ALU_result;
+	wire [31:0] data_mem_output;
+	wire [31:0] address_out;
+	wire [31:0] address_out_proc;
+	wire [31:0] hd_output;
+	wire [31:0] selected_instruction;
+	wire [5:0] exec_proc, intrpt_val;
+	wire [4:0] ALUcode, PRBM_out;
+	wire [15:0] uart_receive;
+	wire [15:0] pre_input_mux_output;
+	
+	wire zero, bounce_button, true_pin_button, clk_div, intrpt;				
+	wire reg_read_shift, reg_write_shift, decoded_exec_proc;
+	
+	wire PRBM_select, PAM_select, jmp, PDMM_select, write_data_mem, stck, beq, bneq, in_mux_select, jal;
+	wire bmm_select, rst, write_instr_mem, proc_swap, load_os, write_reg, write_hd, HDRM_select, trd_msg;
+	wire [1:0] bm_select, change_reg_shift, pc_op;
+	wire send, receive;
+	
+	wire [3:0] mil, cent, dez, uni, cent_pc, dez_pc, uni_pc;
+	wire [3:0] cent_reg_address, dez_reg_address, uni_reg_address;
+	wire [3:0] cent_a, dez_a, uni_a;
+	
+	Frequency_divider FD(
+		.clk_in(clk_auto),
+		.clk_out(clk_div)
+	);
+	
+	DeBounce_v DBNCR( 
+		.clk(clk_auto), 
+		.n_reset(1'b1), 
+		.button_in(check),
+		.DB_out(bounce_button)
+	);
+						
+	one_shot_button OSB(
+		.clk(clk_div), 
+		.dbOut(bounce_button),
+		.one_shot_out(true_pin_button)
+	);
+	Interruption_trigger IT(
+		.offset(selected_instruction[5:0]), 
+		.single_clk(clk_div),
+		.proc_num(decoded_exec_proc),
+		.opcode(selected_instruction[31:26]),
+		.intrpt_val(intrpt_val),
+		.intrpt(intrpt)
+	);
+	
+	Process_keeper PK(
+		.proc_swap(proc_swap),
+		.single_clk(clk_div),
+		.true_intrpt(intrpt),
+		.new_proc_num(data_1[5:0]),
+		.exec_proc(exec_proc)
+	);
+	
+	Control_unit CU(
+		.check(~true_pin_button),
+		.opcode(selected_instruction[31:26]),
+		.PRBM_select(PRBM_select), 
+		.PAM_select(PAM_select),
+		.bm_select(bm_select),
+		.hlt(hlt),
+		.jmp(jmp),
+		.beq(beq),
+		.bneq(bneq),
+		.jal(jal),
+		.rst(rst),
+		.PDMM_select(PDMM_select),
+		.write_data_mem(write_data_mem),
+		.stck(stck),
+		.write_reg(write_reg),
+		.alu_code(ALUcode),
+		.input_mux_select(in_mux_select),
+		.bios_mem_mux_select(bmm_select),
+		.write_instr_mem(write_instr_mem),
+		.proc_swap(proc_swap),
+		.load_os(load_os),
+		.HDRM_select(HDRM_select),
+		.write_hd(write_hd),
+		.lcd_trd_msg(trd_msg),
+		.change_shift(change_reg_shift),
+		.pc_operation(pc_op),
+		.send(send),
+		.receive(receive)
+	);
 
-    // =========================================================================
-    // BARRAMENTOS E FIOS INTERNOS (WIRES)
-    // =========================================================================
-    
-    // Sinais da Unidade de Controle
-    wire        ctrl_JR;
-    wire [1:0]  ctrl_ExtOp;
-    wire        ctrl_Reg2Src;
-    wire        ctrl_RegDst;
-    wire        ctrl_Halt;
-    wire        ctrl_OutEnable;
-    wire        ctrl_Jump;
-    wire        ctrl_Branch;
-    wire        ctrl_MemRead;
-    wire [1:0]  ctrl_MemToReg;
-    wire [3:0]  ctrl_ALUOp;
-    wire        ctrl_MemWrite;
-    wire        ctrl_ALUSrc;
-    wire        ctrl_RegWrite;
+	Program_counter PC (
+		 .proc_num(decoded_exec_proc),
+		 .endereco(address_in),
+		 .clk_escrita(clk_div),
+		 .rst(input_reset || rst),
+		 .jmp(jmp),
+		 .beq(beq),
+		 .bneq(bneq),
+		 .hlt(hlt),
+		 .prog_count(address_out),
+		 .zero(zero),
+		 .operacao(pc_op),
+		 .stored_pc(data_1), 
+		 .only_proc_pc(address_out_proc)
+	);
+					
+	Hard_drive HD(
+		.clk_write(clk_div),
+		.clk_read(clk_auto),
+		.write_flag(write_hd),
+		.proc_num(data_1),
+		.track_line(data_2),
+		.input_data(data_3), 
+		.hd_output(hd_output)
+	);
+	
+	BIOS bios(
+		.clk_read(clk_auto),
+		.address(address_out),
+		.BIOS_out(bios_output)
+	);
+				 
+	Process_decoder PD(
+		.input_exec_proc(exec_proc),
+		.output_exec_proc(decoded_exec_proc)
+	);
+	
+	Memoria_Instrucoes IM (
+		.proc_num(decoded_exec_proc),
+		.escrever_SO(load_os),
+		.flag_escrita(write_instr_mem),
+		.endereco_escrita(data_3[15:0]), 
+		.endereco_leitura(address_out),
+		.dado_entrada(hd_output),
+		.clk_escrita(clk_div),
+		.clk_leitura(clk_auto), 
+		.saida_inst_mem(instr_mem_output)
+	);
+	
+	State_Mux_32 Bios_to_mem_mux(
+		.mux_select(bmm_select),
+		.clk(clk_div),
+		.rst(rst),
+		.hlt(hlt),
+		.input_data_1(bios_output),
+		.input_data_2(instr_mem_output),
+		.mux_output(selected_instruction)
+	);
+	/*
+	 * Seleção da origem da entrada:
+	 *
+	 * interface_mode = 0 -> usa switches físicos da FPGA
+	 * interface_mode = 1 -> usa dados recebidos pela UART
+	 */
+	Mux_16 PRE_INPUT_MUX (
+		.input_data_1(switches),
+		.input_data_2(uart_receive),
+		.mux_output(pre_input_mux_output),
+		.mux_select(receive & interface_mode)
+	);
+	
+	Mux_16 INPUT_MUX (
+		.input_data_1(selected_instruction[15:0]),
+		.input_data_2(pre_input_mux_output),
+		.mux_output(input_mux_output),
+		.mux_select(in_mux_select)
+	);
 
-    // Estrutura de busca e controle do PC
-    wire [31:0] fio_PC_Atual;
-    wire [31:0] fio_PC_Proximo;
-    wire [31:0] fio_PC_Mais1;
-    wire [31:0] fio_PC_Branch;
-    wire [31:0] fio_Saida_MuxPC1;
-    wire [31:0] fio_Saida_MuxPC2;
-    wire        fio_AND_Branch;
+	Mux_5 PRE_REG_BANK_MUX (
+		.input_data_1(selected_instruction[20:16]),
+		.input_data_2(selected_instruction[15:11]),
+		.mux_output(PRBM_out),
+		.mux_select(PRBM_select)
+	);
 
-    // Estrutura de dados das Memórias e Registradores
-    wire [31:0] fio_Instrucao;
-    wire [31:0] fio_DadoMemoria;
-    wire [5:0]  fio_LeReg2;
-    wire [5:0]  fio_EscreveReg;
-    wire [31:0] fio_EscreveDado;
-    wire [31:0] fio_IMEstendido;
-    
-    wire [31:0] fio_LeDado1;
-    wire [31:0] fio_LeDado2;
-    wire [31:0] fio_Valor2_ULA;
-    wire [31:0] fio_ResultadoULA;
-    wire        fio_Zero;
+	Mux_32 HD_TO_REG_MUX(
+		.input_data_1(data_write),
+		.input_data_2(hd_output),
+		.mux_output(HDRM_out),
+		.mux_select(HDRM_select)
+	);
+	
+	Address_setter AS (
+		.single_clk(clk_div),
+		.change_shift(change_reg_shift),
+		.read_shift_enabler(reg_read_shift),
+		.write_shift_enabler(reg_write_shift)
+	);
+	
+	Register_bank RB (
+		.intrpt(intrpt_val),
+		.write_flag(write_reg),
+		.clk_write(clk_div),
+		.hlt(hlt),
+		.jal(jal),
+		.PC(address_out),
+		.PROC_PC(address_out_proc),
+		.pc_operation(pc_op),
+		.read_shift_enabler(reg_read_shift),
+		.write_shift_enabler(reg_write_shift),
+		.write_address(PRBM_out),
+		.read_address_1(selected_instruction[25:21]),
+		.read_address_2(selected_instruction[20:16]),
+		.data_write(HDRM_out),
+		.data_1(data_1),
+		.data_2(data_2),
+		.data_3(data_3),
+		.value_address(output_value)
+	);
 
-    // =========================================================================
-    // ASSOCIAÇÃO DAS PORTAS DE DIAGNÓSTICO (WAVEFORM OUTPUTS)
-    // =========================================================================
-    assign out_PC_Atual     = fio_PC_Atual;
-    assign out_PC_Proximo   = fio_PC_Proximo;
-    assign out_Instrucao    = fio_Instrucao;
-    assign out_DadoLido1    = fio_LeDado1;
-    assign out_DadoLido2    = fio_LeDado2;
-    assign out_RegEscrita   = fio_EscreveReg;
-    assign out_DadoEscrita  = fio_EscreveDado;
-    assign out_ResultadoULA = fio_ResultadoULA;
-    assign out_Zero         = fio_Zero;
-    assign out_IMEstendido  = fio_IMEstendido;
-    assign out_DadoMemoria  = fio_DadoMemoria;
-    
-    assign out_ALUOp        = ctrl_ALUOp;
-    assign out_MemToReg     = ctrl_MemToReg;
-    assign out_ExtOp        = ctrl_ExtOp;
-    assign out_RegWrite     = ctrl_RegWrite;
-    assign out_MemWrite     = ctrl_MemWrite;
-    assign out_MemRead      = ctrl_MemRead;
-    assign out_ALUSrc       = ctrl_ALUSrc;
-    assign out_Jump         = ctrl_Jump;
-    assign out_Branch       = ctrl_Branch;
-    assign out_JR           = ctrl_JR;
-    assign out_Halt         = ctrl_Halt;
+	Extender_26_32 Ext_26_32 (
+		.ext_input(selected_instruction[25:0]),
+		.ext_output(Extend26_32)
+	);
 
-    // Lógicas combinacionais elétricas internas
-    assign fio_AND_Branch   = ctrl_Branch & fio_Zero;
+	Extender_16_32 Ext_16_32 (
+		.ext_input(input_mux_output),
+		.ext_output(Extend16_32)
+	);
 
-    // =========================================================================
-    // 1. UNIDADE DE CONTROLE
-    // =========================================================================
-    UnidadeDeControle unidade_controle_inst (
-        .OP(fio_Instrucao[31:26]),
-        .JR(ctrl_JR),
-        .ExtOp(ctrl_ExtOp),
-        .Reg2Src(ctrl_Reg2Src),
-        .RegDst(ctrl_RegDst),
-        .Halt(ctrl_Halt),
-        .OutEnable(ctrl_OutEnable), 
-        .Jump(ctrl_Jump),
-        .Branch(ctrl_Branch),
-        .MemRead(ctrl_MemRead),
-        .MemToReg(ctrl_MemToReg),
-        .ALUOp(ctrl_ALUOp),
-        .MemWrite(ctrl_MemWrite),
-        .ALUSrc(ctrl_ALUSrc),
-        .RegWrite(ctrl_RegWrite)
-    );
+	Mux_32 PRE_ALU_MUX (
+		.input_data_1(data_2),
+		.input_data_2(Extend16_32),
+		.mux_output(PAM_output),
+		.mux_select(PAM_select)
+	);
 
-    // =========================================================================
-    // 2. GERENCIAMENTO DO PC E ÁRVORE DE SALTOS
-    // =========================================================================
-    PC pc_inst (
-        .Clock(Clock),
-        .Reset(Reset),
-        .Halt(ctrl_Halt),
-        .D(fio_PC_Proximo),
-        .Q(fio_PC_Atual)
-    );
+	Arithmetic_logic_unity ALU (
+		.op(ALUcode),
+		.dado1(data_1),
+		.dado2(PAM_output),
+		.resultado(ALU_result),
+		.zero(zero),
+		.shamt(selected_instruction[10:6])
+	);
 
-    SomadorPC somador_pc_inst (
-        .PCAtual(fio_PC_Atual),
-        .PCMais1(fio_PC_Mais1)
-    );
+	Data_memory DM (
+	   .dado(data_2),
+	   .endereco(ALU_result),
+	   .clk_escrita(clk_div),
+	   .clk_leitura(clk_auto), 
+	   .data_mem_out(data_mem_output),
+	   .flag_escrita(write_data_mem),
+	   .stack_use(stck)
+	);
 
-    SomadorBranch somador_branch_inst (
-        .PCMais1(fio_PC_Mais1),
-        .IMEstendido(fio_IMEstendido),
-        .ResultadoSomador(fio_PC_Branch)
-    );
+	Mux_32 POST_DATA_MEM_MUX (
+		.input_data_1(data_mem_output),
+		.input_data_2(ALU_result),
+		.mux_output(data_write),
+		.mux_select(PDMM_select)
+	);
 
-    MUX_PC1 mux_pc1_inst (
-        .PCMais1(fio_PC_Mais1),
-        .ResultadoSomador(fio_PC_Branch),
-        .AND(fio_AND_Branch),
-        .Saida1(fio_Saida_MuxPC1)
-    );
+	Multiplexador_PC BM (
+		.zero(zero),
+		.seletor(bm_select),
+		.beq(beq),
+		.bneq(bneq),
+		.ext_sum(Extend16_32),
+		.ext_signal(Extend26_32),
+		.reg_bank_upper_data(data_1),
+		.pc_out(address_out),
+		.saida_big_mult(address_in)
+	);
+	/* NETWORK COMMUNICATION MODULE */
+	
+	UART_Manager UART_M (
+		.send(send),
+		.lcd_send(trd_msg),
+		.clk_auto(clk_auto),
 
-    MUX_PC2 mux_pc2_inst (
-        .MUXPC1(fio_Saida_MuxPC1),
-        .IMEstendido(fio_IMEstendido),
-        .Jump(ctrl_Jump),
-        .Saida2(fio_Saida_MuxPC2)
-    );
+		.output_data(output_value[15:0]),
+		.lcd_code(selected_instruction[7:0]),
 
-    MUX_PC3 mux_pc3_inst (
-        .MUXPC2(fio_Saida_MuxPC2),
-        .ResultadoULA(fio_ResultadoULA), // Busca do barramento interno calculado da ULA
-        .JR(ctrl_JR),
-        .Saida3(fio_PC_Proximo)
-    );
+		.UART_RX(uart_rx),
+		.UART_TX(uart_tx),
 
-    // =========================================================================
-    // 3. MEMÓRIAS (ROM E RAM)
-    // =========================================================================
-    MemoriaInstrucoes #(
-        .DATA_WIDTH(32),
-        .ADDR_WIDTH(6)
-    ) memoria_inst_inst (
-        .LeEndereco(fio_PC_Atual[5:0]),
-        .Instrucao(fio_Instrucao)
-    );
+		.data_receive(uart_receive)
+	);
+	
+	/* OUTPUT MODULES */
+	
+	OUT pc_address_output (
+		.cent(cent),
+		.dez(dez),
+		.uni(uni),
+		.hlt(1'b1),
+		.cent_out(cent_out),
+		.dez_out(dez_out), 
+		.uni_out(uni_out)
+	); 
+					
+	OUT pc_address_mil(
+		.uni(mil),
+		.uni_out(mil_out),
+		.hlt(1'b1)
+	);				
+					
+	Bin_BCD_converter pc_address(
+		.binary(address_out),
+		.first(uni),
+		.second(dez),
+		.third(cent),
+		.fourth(mil),
+		.neg(negative)
+	);
+	
+	Display_process_number(
+		.single_clk(clk_div),
+		.new_proc_num(exec_proc),
+		.last_proc_num(last_proc)
+	);
+	
+	Bin_BCD_converter exec_proc_output(
+		.binary(last_proc),
+		.first(uni_reg_address),
+		.second(dez_reg_address),
+		.third(cent_reg_address)
+	);
+	
+	OUT execution_process (
+		.cent(cent_reg_address),
+		.dez(dez_reg_address),
+		.uni(uni_reg_address),
+		.hlt(1'b1),
+		.dez_out(dez_out_reg_address), 
+		.uni_out(uni_out_reg_address) 
+	); 
+	
+	Bin_BCD_converter operation_value_output (
+		.binary(output_value),
+		.first(uni_pc),
+		.second(dez_pc),
+		.third(cent_pc)
+	);
+	
+	OUT op_value (
+		.cent(cent_pc),
+		.dez(dez_pc),
+		.uni(uni_pc),
+		.hlt(hlt),
+		.dez_out(dez_out_pc), 
+		.uni_out(uni_out_pc) 
+	); 
 
-    MemoriaDados #(
-        .DATA_WIDTH(32),
-        .ADDR_WIDTH(6)
-    ) memoria_dados_inst (
-        .Endereco(fio_ResultadoULA[5:0]), // Usa o endereço calculado pela ULA
-        .EscreveDado(fio_LeDado2),
-        .MemWrite(ctrl_MemWrite),
-        .MemRead(ctrl_MemRead),
-        .Clock(Clock),
-        .LeDado(fio_DadoMemoria)
-    );
-
-    // =========================================================================
-    // 4. MULTIPLEXADORES DE ROTEAMENTO (CONEXÕES NOMINAIS SEGUIDAS À RISCA)
-    // =========================================================================
-    MUX_Reg2 mux_reg2_inst (
-        .Instrucao13_8(fio_Instrucao[13:8]),
-        .Instrucao25_20(fio_Instrucao[25:20]),
-        .Reg2Src(ctrl_Reg2Src),
-        .LeReg2(fio_LeReg2)
-    );
-
-    MUX_EscreveReg mux_escrevereg_inst (
-        .Instrucao25_20(fio_Instrucao[25:20]),
-        .RegDst(ctrl_RegDst),
-        .EscreveReg(fio_EscreveReg)
-    );
-
-    ExtensaoSinal extensao_sinal_inst (
-        .Instrucao25_0(fio_Instrucao[25:0]),
-        .ExtOp(ctrl_ExtOp),
-        .IMEstendido(fio_IMEstendido)
-    );
-
-    // Correção por mapeamento nominal para evitar desalinhamento de portas
-    MUX_EscreveDado mux_escrevedado_inst (
-        .ResultadoULA(fio_ResultadoULA),
-        .DadoMemoria(fio_DadoMemoria),
-        .PCMais1(fio_PC_Mais1),
-        .Switches(32'b0),
-        .MemToReg(ctrl_MemToReg),
-        .EscreveDado(fio_EscreveDado)
-    );
-
-    // =========================================================================
-    // 5. NÚCLEO EXECUTOR (BANCO DE REGISTRADORES E ULA)
-    // =========================================================================
-    BancoDeRegistradores banco_regs_inst (
-        .LeReg1(fio_Instrucao[19:14]),
-        .LeReg2(fio_LeReg2),
-        .EscreveReg(fio_EscreveReg),
-        .EscreveDado(fio_EscreveDado),
-        .RegWrite(ctrl_RegWrite),
-        .Clock(Clock),
-        .LeDado1(fio_LeDado1),
-        .LeDado2(fio_LeDado2)
-    );
-
-    MUX_ULA mux_ula_inst (
-        .LeDado2(fio_LeDado2),
-        .IMEstendido(fio_IMEstendido),
-        .ALUSrc(ctrl_ALUSrc),
-        .Valor2(fio_Valor2_ULA)
-    );
-
-    // Conectando diretamente no barramento interno mapeado para os diagnósticos
-    ULA ula_inst (
-        .Valor1(fio_LeDado1),
-        .Valor2(fio_Valor2_ULA),
-        .ALUOp(ctrl_ALUOp),
-        .Resultado(fio_ResultadoULA),
-        .Zero(fio_Zero)
-    );
-
+	LCD DISP(
+		.CLOCK_50(clk_auto),
+		.SW(switches[7:0]),
+		.LCD_ON(lcd_on),
+		.LCD_BLON(lcd_blon),
+		.LCD_RW(lcd_rw),
+		.LCD_EN(lcd_en),
+		.LCD_RS(lcd_rs),
+		.LCD_DATA(lcd_data),
+		.offset(selected_instruction[15:0]),
+		.lcd_trd_msg(trd_msg),
+		.clk_div(clk_div)
+	);
+	
 endmodule
