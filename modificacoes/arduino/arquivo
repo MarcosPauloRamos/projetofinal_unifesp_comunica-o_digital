@@ -1,0 +1,31 @@
+#include <SoftwareSerial.h>
+
+SoftwareSerial fpga_serial(8, 9); 
+// RX = 8 recebe do TX da FPGA
+// TX = 9 envia para RX da FPGA
+
+void setup() {
+
+  Serial.begin(9600);
+
+  fpga_serial.begin(115200);
+}
+
+void loop() {
+
+  // PC/Python -> Arduino -> FPGA
+  while (Serial.available() > 0) {
+
+    byte dado = Serial.read();
+
+    fpga_serial.write(dado);
+  }
+
+  // FPGA -> Arduino -> PC/Python
+  while (fpga_serial.available() > 0) {
+
+    byte dado = fpga_serial.read();
+
+    Serial.write(dado);
+  }
+}
