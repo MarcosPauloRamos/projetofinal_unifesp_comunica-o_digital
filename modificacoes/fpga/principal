@@ -1,0 +1,261 @@
+module Processador (
+    input Clock,
+    input Reset,
+    
+    // =========================================================================
+    // PORTAS DE SAÍDA EXCLUSIVAS PARA OBSERVAÇÃO NA WAVEFORM (DEBUG)
+    // =========================================================================
+    // Estado do Fluxo de Programa
+    output [31:0] out_PC_Atual,       // Para ver qual endereço de instrução está rodando
+    output [31:0] out_PC_Proximo,     // Para ver para onde o PC vai saltar no próximo clock
+    output [31:0] out_Instrucao,      // Para ver a instrução de 32 bits atual
+    
+    // Monitoramento do Banco de Registradores
+    output [31:0] out_DadoLido1,      // Valor que saiu da porta 1 do banco (Valor1 da ULA)
+    output [31:0] out_DadoLido2,      // Valor que saiu da porta 2 do banco (Valor2 da ULA ou dado p/ RAM)
+    output [5:0]  out_RegEscrita,     // Qual registrador está sendo o destino da gravação (rd ou RAL)
+    output [31:0] out_DadoEscrita,    // O dado exato que está entrando para ser gravado no banco
+    
+    // Monitoramento da ULA e Memória RAM
+    output [31:0] out_ResultadoULA,   // O resultado direto da operação da ULA
+    output        out_Zero,           // Flag Zero (crucial para checar BEQ/BNE)
+    output [31:0] out_IMEstendido,    // O valor do imediato após passar pelo extensor de sinal
+    output [31:0] out_DadoMemoria,    // O dado que acabou de ser lido da memória RAM
+    
+    // Monitoramento de Barramentos de Controle 
+    output [3:0]  out_ALUOp,          // Operação selecionada para a ULA
+    output [1:0]  out_MemToReg,       // Seletor do MUX de Write-Back
+    output [1:0]  out_ExtOp,          // Seletor do tipo de extensão do imediato
+    output        out_RegWrite,       // Habilitação de escrita no banco
+    output        out_MemWrite,       // Habilitação de escrita na RAM
+    output        out_MemRead,        // Habilitação de leitura na RAM
+    output        out_ALUSrc,         // Seletor de entrada da ULA (Reg vs Imediato)
+    output        out_Jump,           // Sinal de Jump ativo
+    output        out_Branch,         // Sinal de Branch ativo
+    output        out_JR,             // Sinal de Jump Register ativo
+    output        out_Halt            // Sinal de parada do processador
+);
+
+    // =========================================================================
+    // BARRAMENTOS E FIOS INTERNOS (WIRES)
+    // =========================================================================
+    
+    // Sinais da Unidade de Controle
+    wire        ctrl_JR;
+    wire [1:0]  ctrl_ExtOp;
+    wire        ctrl_Reg2Src;
+    wire        ctrl_RegDst;
+    wire        ctrl_Halt;
+    wire        ctrl_OutEnable;
+    wire        ctrl_Jump;
+    wire        ctrl_Branch;
+    wire        ctrl_MemRead;
+    wire [1:0]  ctrl_MemToReg;
+    wire [3:0]  ctrl_ALUOp;
+    wire        ctrl_MemWrite;
+    wire        ctrl_ALUSrc;
+    wire        ctrl_RegWrite;
+
+    // Estrutura de busca e controle do PC
+    wire [31:0] fio_PC_Atual;
+    wire [31:0] fio_PC_Proximo;
+    wire [31:0] fio_PC_Mais1;
+    wire [31:0] fio_PC_Branch;
+    wire [31:0] fio_Saida_MuxPC1;
+    wire [31:0] fio_Saida_MuxPC2;
+    wire        fio_AND_Branch;
+
+    // Estrutura de dados das Memórias e Registradores
+    wire [31:0] fio_Instrucao;
+    wire [31:0] fio_DadoMemoria;
+    wire [5:0]  fio_LeReg2;
+    wire [5:0]  fio_EscreveReg;
+    wire [31:0] fio_EscreveDado;
+    wire [31:0] fio_IMEstendido;
+    
+    wire [31:0] fio_LeDado1;
+    wire [31:0] fio_LeDado2;
+    wire [31:0] fio_Valor2_ULA;
+    wire [31:0] fio_ResultadoULA;
+    wire        fio_Zero;
+
+    // =========================================================================
+    // ASSOCIAÇÃO DAS PORTAS DE DIAGNÓSTICO (WAVEFORM OUTPUTS)
+    // =========================================================================
+    assign out_PC_Atual     = fio_PC_Atual;
+    assign out_PC_Proximo   = fio_PC_Proximo;
+    assign out_Instrucao    = fio_Instrucao;
+    assign out_DadoLido1    = fio_LeDado1;
+    assign out_DadoLido2    = fio_LeDado2;
+    assign out_RegEscrita   = fio_EscreveReg;
+    assign out_DadoEscrita  = fio_EscreveDado;
+    assign out_ResultadoULA = fio_ResultadoULA;
+    assign out_Zero         = fio_Zero;
+    assign out_IMEstendido  = fio_IMEstendido;
+    assign out_DadoMemoria  = fio_DadoMemoria;
+    
+    assign out_ALUOp        = ctrl_ALUOp;
+    assign out_MemToReg     = ctrl_MemToReg;
+    assign out_ExtOp        = ctrl_ExtOp;
+    assign out_RegWrite     = ctrl_RegWrite;
+    assign out_MemWrite     = ctrl_MemWrite;
+    assign out_MemRead      = ctrl_MemRead;
+    assign out_ALUSrc       = ctrl_ALUSrc;
+    assign out_Jump         = ctrl_Jump;
+    assign out_Branch       = ctrl_Branch;
+    assign out_JR           = ctrl_JR;
+    assign out_Halt         = ctrl_Halt;
+
+    // Lógicas combinacionais elétricas internas
+    assign fio_AND_Branch   = ctrl_Branch & fio_Zero;
+
+    // =========================================================================
+    // 1. UNIDADE DE CONTROLE
+    // =========================================================================
+    UnidadeDeControle unidade_controle_inst (
+        .OP(fio_Instrucao[31:26]),
+        .JR(ctrl_JR),
+        .ExtOp(ctrl_ExtOp),
+        .Reg2Src(ctrl_Reg2Src),
+        .RegDst(ctrl_RegDst),
+        .Halt(ctrl_Halt),
+        .OutEnable(ctrl_OutEnable), 
+        .Jump(ctrl_Jump),
+        .Branch(ctrl_Branch),
+        .MemRead(ctrl_MemRead),
+        .MemToReg(ctrl_MemToReg),
+        .ALUOp(ctrl_ALUOp),
+        .MemWrite(ctrl_MemWrite),
+        .ALUSrc(ctrl_ALUSrc),
+        .RegWrite(ctrl_RegWrite)
+    );
+
+    // =========================================================================
+    // 2. GERENCIAMENTO DO PC E ÁRVORE DE SALTOS
+    // =========================================================================
+    PC pc_inst (
+        .Clock(Clock),
+        .Reset(Reset),
+        .Halt(ctrl_Halt),
+        .D(fio_PC_Proximo),
+        .Q(fio_PC_Atual)
+    );
+
+    SomadorPC somador_pc_inst (
+        .PCAtual(fio_PC_Atual),
+        .PCMais1(fio_PC_Mais1)
+    );
+
+    SomadorBranch somador_branch_inst (
+        .PCMais1(fio_PC_Mais1),
+        .IMEstendido(fio_IMEstendido),
+        .ResultadoSomador(fio_PC_Branch)
+    );
+
+    MUX_PC1 mux_pc1_inst (
+        .PCMais1(fio_PC_Mais1),
+        .ResultadoSomador(fio_PC_Branch),
+        .AND(fio_AND_Branch),
+        .Saida1(fio_Saida_MuxPC1)
+    );
+
+    MUX_PC2 mux_pc2_inst (
+        .MUXPC1(fio_Saida_MuxPC1),
+        .IMEstendido(fio_IMEstendido),
+        .Jump(ctrl_Jump),
+        .Saida2(fio_Saida_MuxPC2)
+    );
+
+    MUX_PC3 mux_pc3_inst (
+        .MUXPC2(fio_Saida_MuxPC2),
+        .ResultadoULA(fio_ResultadoULA), // Busca do barramento interno calculado da ULA
+        .JR(ctrl_JR),
+        .Saida3(fio_PC_Proximo)
+    );
+
+    // =========================================================================
+    // 3. MEMÓRIAS (ROM E RAM)
+    // =========================================================================
+    MemoriaInstrucoes #(
+        .DATA_WIDTH(32),
+        .ADDR_WIDTH(6)
+    ) memoria_inst_inst (
+        .LeEndereco(fio_PC_Atual[5:0]),
+        .Instrucao(fio_Instrucao)
+    );
+
+    MemoriaDados #(
+        .DATA_WIDTH(32),
+        .ADDR_WIDTH(6)
+    ) memoria_dados_inst (
+        .Endereco(fio_ResultadoULA[5:0]), // Usa o endereço calculado pela ULA
+        .EscreveDado(fio_LeDado2),
+        .MemWrite(ctrl_MemWrite),
+        .MemRead(ctrl_MemRead),
+        .Clock(Clock),
+        .LeDado(fio_DadoMemoria)
+    );
+
+    // =========================================================================
+    // 4. MULTIPLEXADORES DE ROTEAMENTO (CONEXÕES NOMINAIS SEGUIDAS À RISCA)
+    // =========================================================================
+    MUX_Reg2 mux_reg2_inst (
+        .Instrucao13_8(fio_Instrucao[13:8]),
+        .Instrucao25_20(fio_Instrucao[25:20]),
+        .Reg2Src(ctrl_Reg2Src),
+        .LeReg2(fio_LeReg2)
+    );
+
+    MUX_EscreveReg mux_escrevereg_inst (
+        .Instrucao25_20(fio_Instrucao[25:20]),
+        .RegDst(ctrl_RegDst),
+        .EscreveReg(fio_EscreveReg)
+    );
+
+    ExtensaoSinal extensao_sinal_inst (
+        .Instrucao25_0(fio_Instrucao[25:0]),
+        .ExtOp(ctrl_ExtOp),
+        .IMEstendido(fio_IMEstendido)
+    );
+
+    // Correção por mapeamento nominal para evitar desalinhamento de portas
+    MUX_EscreveDado mux_escrevedado_inst (
+        .ResultadoULA(fio_ResultadoULA),
+        .DadoMemoria(fio_DadoMemoria),
+        .PCMais1(fio_PC_Mais1),
+        .Switches(32'b0),
+        .MemToReg(ctrl_MemToReg),
+        .EscreveDado(fio_EscreveDado)
+    );
+
+    // =========================================================================
+    // 5. NÚCLEO EXECUTOR (BANCO DE REGISTRADORES E ULA)
+    // =========================================================================
+    BancoDeRegistradores banco_regs_inst (
+        .LeReg1(fio_Instrucao[19:14]),
+        .LeReg2(fio_LeReg2),
+        .EscreveReg(fio_EscreveReg),
+        .EscreveDado(fio_EscreveDado),
+        .RegWrite(ctrl_RegWrite),
+        .Clock(Clock),
+        .LeDado1(fio_LeDado1),
+        .LeDado2(fio_LeDado2)
+    );
+
+    MUX_ULA mux_ula_inst (
+        .LeDado2(fio_LeDado2),
+        .IMEstendido(fio_IMEstendido),
+        .ALUSrc(ctrl_ALUSrc),
+        .Valor2(fio_Valor2_ULA)
+    );
+
+    // Conectando diretamente no barramento interno mapeado para os diagnósticos
+    ULA ula_inst (
+        .Valor1(fio_LeDado1),
+        .Valor2(fio_Valor2_ULA),
+        .ALUOp(ctrl_ALUOp),
+        .Resultado(fio_ResultadoULA),
+        .Zero(fio_Zero)
+    );
+
+endmodule
