@@ -1,31 +1,43 @@
-#include <SoftwareSerial.h>
+HardwareSerial FPGAserial(2);
 
-SoftwareSerial fpga_serial(8, 9); 
-// RX = 8 recebe do TX da FPGA
-// TX = 9 envia para RX da FPGA
+void setup()
+{
+    // Comunicação com o PC (Python)
+    Serial.begin(9600);
 
-void setup() {
-
-  Serial.begin(9600);
-
-  fpga_serial.begin(115200);
+    // Comunicação com a FPGA
+    // UART2
+    // RX2 = GPIO16
+    // TX2 = GPIO17
+    FPGAserial.begin(
+        115200,
+        SERIAL_8N1,
+        16,
+        17
+    );
 }
 
-void loop() {
+void loop()
+{
+    //
+    // PC -> FPGA
+    //
 
-  // PC/Python -> Arduino -> FPGA
-  while (Serial.available() > 0) {
+    while (Serial.available() > 0)
+    {
+        byte dado = Serial.read();
 
-    byte dado = Serial.read();
+        FPGAserial.write(dado);
+    }
 
-    fpga_serial.write(dado);
-  }
+    //
+    // FPGA -> PC
+    //
 
-  // FPGA -> Arduino -> PC/Python
-  while (fpga_serial.available() > 0) {
+    while (FPGAserial.available() > 0)
+    {
+        byte dado = FPGAserial.read();
 
-    byte dado = fpga_serial.read();
-
-    Serial.write(dado);
-  }
+        Serial.write(dado);
+    }
 }
