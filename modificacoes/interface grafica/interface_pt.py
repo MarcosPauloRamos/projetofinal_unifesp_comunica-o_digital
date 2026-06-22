@@ -16,6 +16,10 @@ class Ui_MainWindow(object):
             800
         )
 
+        MainWindow.setWindowTitle(
+            "BM32OS"
+        )
+
         self.centralwidget = QtWidgets.QWidget(
             MainWindow
         )
@@ -48,20 +52,94 @@ class Ui_MainWindow(object):
             "BM32OS - Interface de Controle"
         )
 
-        font = QtGui.QFont()
+        font_title = QtGui.QFont()
 
-        font.setPointSize(16)
+        font_title.setPointSize(
+            16
+        )
 
-        font.setBold(True)
+        font_title.setBold(
+            True
+        )
 
         self.label_title.setFont(
-            font
+            font_title
         )
 
         self.verticalLayout.addWidget(
             self.label_title
         )
+from PyQt5 import QtCore
+from PyQt5 import QtGui
+from PyQt5 import QtWidgets
 
+
+class Ui_MainWindow(object):
+
+    def setupUi(self, MainWindow):
+
+        MainWindow.setObjectName(
+            "MainWindow"
+        )
+
+        MainWindow.resize(
+            1100,
+            800
+        )
+
+        MainWindow.setWindowTitle(
+            "BM32OS"
+        )
+
+        self.centralwidget = QtWidgets.QWidget(
+            MainWindow
+        )
+
+        MainWindow.setCentralWidget(
+            self.centralwidget
+        )
+
+        #
+        # LAYOUT PRINCIPAL
+        #
+
+        self.verticalLayout = (
+            QtWidgets.QVBoxLayout(
+                self.centralwidget
+            )
+        )
+
+        #
+        # TITULO
+        #
+
+        self.label_title = QtWidgets.QLabel()
+
+        self.label_title.setAlignment(
+            QtCore.Qt.AlignCenter
+        )
+
+        self.label_title.setText(
+            "BM32OS - Interface de Controle"
+        )
+
+        font_title = QtGui.QFont()
+
+        font_title.setPointSize(
+            16
+        )
+
+        font_title.setBold(
+            True
+        )
+
+        self.label_title.setFont(
+            font_title
+        )
+
+        self.verticalLayout.addWidget(
+            self.label_title
+        )
         #
         # LCD VIRTUAL
         #
@@ -90,6 +168,10 @@ class Ui_MainWindow(object):
             True
         )
 
+        self.label_lcd.setText(
+            "Aguardando dados..."
+        )
+
         self.group_lcd_layout.addWidget(
             self.label_lcd
         )
@@ -97,6 +179,7 @@ class Ui_MainWindow(object):
         self.verticalLayout.addWidget(
             self.group_lcd
         )
+
         #
         # DISPLAYS FPGA
         #
@@ -113,13 +196,13 @@ class Ui_MainWindow(object):
 
         font_display = QtGui.QFont()
 
-        font_display.setPointSize(24)
+        font_display.setPointSize(
+            24
+        )
 
-        font_display.setBold(True)
-
-        #
-        # DISPLAY 1
-        #
+        font_display.setBold(
+            True
+        )
 
         self.display_1 = QtWidgets.QLabel(
             "0"
@@ -137,10 +220,6 @@ class Ui_MainWindow(object):
             self.display_1
         )
 
-        #
-        # DISPLAY 2
-        #
-
         self.display_2 = QtWidgets.QLabel(
             "0"
         )
@@ -157,10 +236,6 @@ class Ui_MainWindow(object):
             self.display_2
         )
 
-        #
-        # DISPLAY 3
-        #
-
         self.display_3 = QtWidgets.QLabel(
             "0"
         )
@@ -176,10 +251,6 @@ class Ui_MainWindow(object):
         self.display_layout.addWidget(
             self.display_3
         )
-
-        #
-        # DISPLAY 4
-        #
 
         self.display_4 = QtWidgets.QLabel(
             "0"
@@ -200,7 +271,6 @@ class Ui_MainWindow(object):
         self.verticalLayout.addWidget(
             self.group_display
         )
-
         #
         # BOTAO CONECTAR
         #
@@ -214,6 +284,7 @@ class Ui_MainWindow(object):
         self.verticalLayout.addWidget(
             self.push_button_start
         )
+
         #
         # ENTRADA NUMERICA
         #
@@ -320,12 +391,10 @@ class Ui_MainWindow(object):
         )
 
         self.table_programs.setHorizontalHeaderLabels(
-
             [
                 "ID",
                 "Nome"
             ]
-
         )
 
         self.table_programs.horizontalHeader().setStretchLastSection(
@@ -337,15 +406,11 @@ class Ui_MainWindow(object):
         )
 
         self.table_programs.setEditTriggers(
-
             QtWidgets.QAbstractItemView.NoEditTriggers
-
         )
 
         self.table_programs.setSelectionMode(
-
             QtWidgets.QAbstractItemView.NoSelection
-
         )
 
         self.group_programs_layout.addWidget(
@@ -355,6 +420,7 @@ class Ui_MainWindow(object):
         self.verticalLayout.addWidget(
             self.group_programs
         )
+
         #
         # STATUS
         #
@@ -384,7 +450,6 @@ class Ui_MainWindow(object):
         self.verticalLayout.addWidget(
             self.group_status
         )
-
         #
         # LOG UART
         #
@@ -412,7 +477,7 @@ class Ui_MainWindow(object):
         )
 
         #
-        # FINALIZAÇÃO
+        # FINALIZACAO
         #
 
         self.retranslateUi(
@@ -421,4 +486,10 @@ class Ui_MainWindow(object):
 
         QtCore.QMetaObject.connectSlotsByName(
             MainWindow
+        )
+
+    def retranslateUi(self, MainWindow):
+
+        MainWindow.setWindowTitle(
+            "BM32OS"
         )
