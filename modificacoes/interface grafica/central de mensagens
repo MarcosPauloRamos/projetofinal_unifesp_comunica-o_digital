@@ -1,0 +1,724 @@
+from PyQt5 import QtCore
+from PyQt5 import QtWidgets
+
+import sys
+import time
+import serial
+
+import interface_pt
+
+
+#
+# MODOS DA INTERFACE
+#
+
+MODO_NENHUM = 0
+MODO_NUMERICO = 1
+MODO_TEXTO = 2
+MODO_ENTER = 3
+
+
+#
+# MENSAGENS DO LCD
+#
+
+LCD_MESSAGES = {
+
+    0: "Iniciando SO System",
+    1: "1 - EXEC PROC\n2 - ARQUIVOS",
+    2: "Executar quantos arquivos",
+    3: "Arquivo nao encontrado",
+    4: "Executando processo",
+    5: "Todos processos concluidos",
+    6: "Escolha a operacao",
+    7: "1 Novo\n2 Renomear\n3 Apagar",
+    8: "HD cheio",
+    9: "Digite numero de instrucoes",
+    10: "Digite os 16 bits iniciais",
+    11: "Digite os ultimos 16 bits",
+    12: "Digite nome do arquivo",
+    13: "Ja existe esse arquivo",
+    14: "Arquivo criado",
+    15: "Qual arquivo renomear",
+    16: "Escolha outro ID",
+    17: "Qual nome do novo arquivo",
+    18: "ID ja existe",
+    19: "Arquivo renomeado",
+    20: "Qual arquivo deletar",
+    21: "Arquivo deletado",
+    22: "Iniciando BIOS",
+    23: "Enter number 13",
+    24: "Please enter required value",
+    25: "Memoria iniciada",
+    26: "Componentes logicos iniciados",
+    27: "Iniciando SO",
+    28: "Sistema iniciado",
+    29: "Digite ID do arquivo",
+    30: "Digite uma entrada",
+    31: "Aperte enter para ver output",
+    32: "Processo executado com sucesso",
+    33: "Process requires UART input",
+    34: "Process requires UART output"
+
+}
+class CentralMensagens(
+
+    QtWidgets.QMainWindow,
+    interface_pt.Ui_MainWindow
+
+):
+
+    def __init__(self, parent=None):
+
+        super().__init__(parent)
+
+        self.setupUi(self)
+
+        #
+        # SERIAL
+        #
+
+        self.arduino = None
+
+        self.connected = False
+
+        #
+        # ESTADO DA INTERFACE
+        #
+
+        self.modo = MODO_NENHUM
+
+        self.last_lcd_code = -1
+
+        #
+        # PROGRAMAS INICIAIS
+        #
+
+        self.programas = [
+
+            "Pow UART",
+            "Fibonacci UART",
+            "Max UART",
+            "Min",
+            "Selection Sort",
+            "Array Average",
+            "",
+            "",
+            "",
+            ""
+
+        ]
+
+        #
+        # CONTROLE AUXILIAR
+        #
+
+        self.id_renomeacao = None
+
+        self.id_exclusao = None
+
+        #
+        # BOTOES
+        #
+
+        self.push_button_start.clicked.connect(
+            self.begin_serial_connection
+        )
+
+        self.push_button_send_number.clicked.connect(
+            self.send_number
+        )
+
+        self.push_button_save_name.clicked.connect(
+            self.save_program_name
+        )
+
+        #
+        # TIMER PARA RECEPCAO AUTOMATICA
+        #
+
+        self.timer = QtCore.QTimer()
+
+        self.timer.timeout.connect(
+            self.receive_data
+        )
+
+        #
+        # INICIALIZACAO
+        #
+
+        self.disable_all_inputs()
+
+        self.update_program_table()
+
+        self.text_browser_status.append(
+            "Desconectado"
+        )
+    #
+    # ---------------------------------------------------------
+    # LOG
+    # ---------------------------------------------------------
+    #
+
+    def log(self, text):
+
+        self.text_browser_receive.append(
+            text
+        )
+
+    #
+    # ---------------------------------------------------------
+    # CONEXAO SERIAL
+    # ---------------------------------------------------------
+    #
+
+    def begin_serial_connection(self):
+
+        try:
+
+            self.arduino = serial.Serial(
+                "COM10",
+                9600,
+                timeout=0.05
+            )
+
+            time.sleep(2)
+
+            self.connected = True
+
+            self.text_browser_status.clear()
+
+            self.text_browser_status.append(
+                "Conectado"
+            )
+
+            self.log(
+                "Conexao estabelecida."
+            )
+
+            #
+            # Recepcao automatica
+            #
+
+            self.timer.start(20)
+
+        except Exception as err:
+
+            self.connected = False
+
+            self.text_browser_status.clear()
+
+            self.text_browser_status.append(
+                "Desconectado"
+            )
+
+            self.log(
+                str(err)
+            )
+
+    #
+    # ---------------------------------------------------------
+    # HABILITACAO DOS CAMPOS
+    # ---------------------------------------------------------
+    #
+
+    def disable_all_inputs(self):
+
+        self.line_edit_number.setEnabled(
+            False
+        )
+
+        self.push_button_send_number.setEnabled(
+            False
+        )
+
+        self.line_edit_text.setEnabled(
+            False
+        )
+
+        self.push_button_save_name.setEnabled(
+            False
+        )
+
+    def enable_numeric(self):
+
+        self.disable_all_inputs()
+
+        self.line_edit_number.setEnabled(
+            True
+        )
+
+        self.push_button_send_number.setEnabled(
+            True
+        )
+
+        self.modo = MODO_NUMERICO
+
+    def enable_text(self):
+
+        self.disable_all_inputs()
+
+        self.line_edit_text.setEnabled(
+            True
+        )
+
+        self.push_button_save_name.setEnabled(
+            True
+        )
+
+        self.modo = MODO_TEXTO
+
+    def enable_enter(self):
+
+        self.disable_all_inputs()
+
+        #
+        # Apenas o botao OK fica ativo
+        #
+
+        self.push_button_send_number.setEnabled(
+            True
+        )
+
+        self.modo = MODO_ENTER
+    #
+    # ---------------------------------------------------------
+    # ENVIO DE DADOS
+    # ---------------------------------------------------------
+    #
+
+    def send_number(self):
+
+        if not self.connected:
+
+            self.log(
+                "Sistema nao conectado."
+            )
+
+            return
+
+        #
+        # MODO ENTER
+        #
+
+        if self.modo == MODO_ENTER:
+
+            try:
+
+                self.arduino.write(
+                    bytes([254])
+                )
+
+                self.log(
+                    "TX -> ENTER"
+                )
+
+            except Exception as err:
+
+                self.log(
+                    f"Erro TX: {err}"
+                )
+
+            return
+
+        #
+        # MODO NUMERICO
+        #
+
+        text = self.line_edit_number.text().strip()
+
+        if text == "":
+
+            self.log(
+                "Digite um numero."
+            )
+
+            return
+
+        if not text.isdigit():
+
+            self.log(
+                "Somente numeros."
+            )
+
+            return
+
+        value = int(text)
+
+        if value < 0 or value > 255:
+
+            self.log(
+                "Valor deve estar entre 0 e 255."
+            )
+
+            return
+
+        try:
+
+            self.arduino.write(
+                bytes([value])
+            )
+
+            self.log(
+                f"TX -> {value}"
+            )
+
+            self.line_edit_number.clear()
+
+        except Exception as err:
+
+            self.log(
+                f"Erro TX: {err}"
+            )
+
+    #
+    # ---------------------------------------------------------
+    # SALVAR NOME
+    # ---------------------------------------------------------
+    #
+
+    def save_program_name(self):
+
+        text = self.line_edit_text.text().strip()
+
+        if text == "":
+
+            self.log(
+                "Digite um nome."
+            )
+
+            return
+
+        #
+        # Primeira posição livre
+        #
+
+        try:
+
+            index = self.programas.index("")
+
+        except ValueError:
+
+            self.log(
+                "Lista cheia."
+            )
+
+            return
+
+        self.programas[index] = text
+
+        self.update_program_table()
+
+        self.line_edit_text.clear()
+
+        self.enable_numeric()
+
+        self.log(
+            f"Programa salvo: {text}"
+        )
+    #
+    # ---------------------------------------------------------
+    # ATUALIZACAO DA TABELA
+    # ---------------------------------------------------------
+    #
+
+    def update_program_table(self):
+
+        for i in range(10):
+
+            self.table_programs.setItem(
+                i,
+                0,
+                QtWidgets.QTableWidgetItem(
+                    str(i)
+                )
+            )
+
+            nome = self.programas[i]
+
+            if nome == "":
+
+                nome = "Livre"
+
+            self.table_programs.setItem(
+                i,
+                1,
+                QtWidgets.QTableWidgetItem(
+                    nome
+                )
+            )
+
+    #
+    # ---------------------------------------------------------
+    # ATUALIZACAO DO LCD VIRTUAL
+    # ---------------------------------------------------------
+    #
+
+    def update_lcd(self, code):
+
+        self.last_lcd_code = code
+
+        text = LCD_MESSAGES.get(
+            code,
+            f"Mensagem desconhecida: {code}"
+        )
+
+        self.label_lcd.setText(
+            text
+        )
+
+        self.log(
+            f"LCD <- {code}"
+        )
+
+        self.update_input_mode_by_lcd(
+            code
+        )
+
+    #
+    # ---------------------------------------------------------
+    # ATUALIZACAO DOS DISPLAYS
+    # ---------------------------------------------------------
+    #
+
+    def update_display(self, value):
+
+        value_text = str(value).zfill(4)
+
+        value_text = value_text[-4:]
+
+        self.display_1.setText(
+            value_text[0]
+        )
+
+        self.display_2.setText(
+            value_text[1]
+        )
+
+        self.display_3.setText(
+            value_text[2]
+        )
+
+        self.display_4.setText(
+            value_text[3]
+        )
+
+        self.log(
+            f"DISPLAY <- {value}"
+        )
+    #
+    # ---------------------------------------------------------
+    # MODO DE ENTRADA CONFORME LCD
+    # ---------------------------------------------------------
+    #
+
+    def update_input_mode_by_lcd(self, code):
+
+        #
+        # Mensagens que precisam apenas de OK / ENTER
+        #
+
+        if code in [
+            0,   # Iniciando SO System
+            22,  # Iniciando BIOS
+            25,  # Memoria iniciada
+            26,  # Componentes logicos iniciados
+            27,  # Iniciando SO
+            31   # Aperte enter para ver output
+        ]:
+
+            self.enable_enter()
+
+            return
+
+        #
+        # Mensagens que precisam de numero
+        #
+
+        if code in [
+            1,   # Menu principal
+            2,   # Executar quantos arquivos
+            6,   # Escolha operacao
+            7,   # Menu arquivos
+            9,   # Numero de instrucoes
+            10,  # Primeiros 16 bits
+            11,  # Ultimos 16 bits
+            15,  # Qual arquivo renomear
+            16,  # Escolha outro ID
+            20,  # Qual arquivo deletar
+            23,  # Enter number 13
+            24,  # Required value
+            29,  # Digite ID do arquivo
+            30,  # Digite uma entrada
+            33,  # UART input
+            34   # UART output
+        ]:
+
+            self.enable_numeric()
+
+            return
+
+        #
+        # Mensagens que precisam de texto apenas no Python
+        #
+
+        if code in [
+            12,  # Digite nome do arquivo
+            17   # Qual nome do novo arquivo
+        ]:
+
+            self.enable_text()
+
+            return
+
+        #
+        # Qualquer outra mensagem bloqueia as entradas
+        #
+
+        self.disable_all_inputs()
+    #
+    # ---------------------------------------------------------
+    # RECEPCAO AUTOMATICA DA UART
+    # ---------------------------------------------------------
+    #
+
+    def receive_data(self):
+
+        if not self.connected:
+
+            return
+
+        try:
+
+            while self.arduino.in_waiting > 0:
+
+                #
+                # Primeiro byte = tipo
+                #
+
+                packet_type = self.arduino.read(1)
+
+                if len(packet_type) == 0:
+
+                    return
+
+                packet_type = packet_type[0]
+
+                #
+                # -------------------------
+                # LCD
+                # -------------------------
+                #
+
+                if packet_type == 0:
+
+                    data = self.arduino.read(1)
+
+                    if len(data) != 1:
+
+                        return
+
+                    lcd_code = data[0]
+
+                    self.update_lcd(
+                        lcd_code
+                    )
+
+                #
+                # -------------------------
+                # DISPLAY
+                # -------------------------
+                #
+
+                elif packet_type == 1:
+
+                    high = self.arduino.read(1)
+
+                    low = self.arduino.read(1)
+
+                    if len(high) != 1:
+
+                        return
+
+                    if len(low) != 1:
+
+                        return
+
+                    value = (
+                        (high[0] << 8)
+                        |
+                        low[0]
+                    )
+
+                    self.update_display(
+                        value
+                    )
+
+                #
+                # -------------------------
+                # PACOTE DESCONHECIDO
+                # -------------------------
+                #
+
+                else:
+
+                    self.log(
+                        f"Pacote desconhecido: {packet_type}"
+                    )
+
+        except Exception as err:
+
+            self.log(
+                f"Erro RX: {err}"
+            )
+    #
+    # ---------------------------------------------------------
+    # FECHAR APLICACAO
+    # ---------------------------------------------------------
+    #
+
+    def closeEvent(self, event):
+
+        try:
+
+            self.timer.stop()
+
+            if self.arduino is not None:
+
+                if self.arduino.is_open:
+
+                    self.arduino.close()
+
+        except Exception as err:
+
+            self.log(
+                f"Erro ao fechar serial: {err}"
+            )
+
+        event.accept()
+
+
+#
+# ---------------------------------------------------------
+# MAIN
+# ---------------------------------------------------------
+#
+
+def main():
+
+    app = QtWidgets.QApplication(
+        sys.argv
+    )
+
+    window = CentralMensagens()
+
+    window.show()
+
+    sys.exit(
+        app.exec()
+    )
+
+
+if __name__ == "__main__":
+
+    main()
