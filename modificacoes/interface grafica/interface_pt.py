@@ -101,6 +101,20 @@ class Ui_MainWindow(object):
             "Aguardando dados..."
         )
 
+        font_lcd = QtGui.QFont()
+
+        font_lcd.setPointSize(
+            14
+        )
+
+        font_lcd.setBold(
+            True
+        )
+
+        self.label_lcd.setFont(
+            font_lcd
+        )
+
         self.group_lcd_layout.addWidget(
             self.label_lcd
         )
@@ -133,66 +147,46 @@ class Ui_MainWindow(object):
             True
         )
 
-        self.display_1 = QtWidgets.QLabel(
-            "0"
-        )
-
+        self.display_1 = QtWidgets.QLabel("0")
         self.display_1.setAlignment(
             QtCore.Qt.AlignCenter
         )
-
         self.display_1.setFont(
             font_display
         )
-
         self.display_layout.addWidget(
             self.display_1
         )
 
-        self.display_2 = QtWidgets.QLabel(
-            "0"
-        )
-
+        self.display_2 = QtWidgets.QLabel("0")
         self.display_2.setAlignment(
             QtCore.Qt.AlignCenter
         )
-
         self.display_2.setFont(
             font_display
         )
-
         self.display_layout.addWidget(
             self.display_2
         )
 
-        self.display_3 = QtWidgets.QLabel(
-            "0"
-        )
-
+        self.display_3 = QtWidgets.QLabel("0")
         self.display_3.setAlignment(
             QtCore.Qt.AlignCenter
         )
-
         self.display_3.setFont(
             font_display
         )
-
         self.display_layout.addWidget(
             self.display_3
         )
 
-        self.display_4 = QtWidgets.QLabel(
-            "0"
-        )
-
+        self.display_4 = QtWidgets.QLabel("0")
         self.display_4.setAlignment(
             QtCore.Qt.AlignCenter
         )
-
         self.display_4.setFont(
             font_display
         )
-
         self.display_layout.addWidget(
             self.display_4
         )
